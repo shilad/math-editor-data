@@ -13,3 +13,5 @@ Our dataset contains the following:
 2. **Editor Information** - *editors.csv*: Information from Turkers about editors for each Journal. A simple name-matching algorithm was used to join editors for the same journal.
 3. **Gender Information** - *finalData.csv*: Full dataset of editorships with gender information. "gender" is the raw inferred gender, probF, probM, and probNA are the adjusted calibrations as described in the paper. "TurkGender" is the Turker gender score as described in the paper. "inferredGender" is the gender as inferred by genderize.io. "inferredGenderScore" is the genderize.io score as described in the paper.
 4. **Validation dataset** - *validation.csv*: Human-annotated validation dataset. Genders as coded by the authors appear in the "Expert Gender" column.
+
+We have also included our three main R analysis scripts. Note that these will not run without adjusting filename information, but they will provide insight into our analysis details. Please let us know if you have questions on these.
