@@ -9,5 +9,6 @@ If you have questions about this dataset let use this dataset in your own work, 
 
 Our dataset contains the following:
 
-1. **Journal Information** (journal_data.csv). Includes the source abbreviations from Thomson / Reuters Journal Citation Reports (JCR), the Turker responses for Journal Title and Journal URLs, an our corrected journal titles.
-2. **
+1. **Journal Information** - *journal_data.csv*: Includes the source abbreviations from Thomson / Reuters Journal Citation Reports (JCR), the Turker responses for Journal Title and Journal URLs, an our corrected journal titles.
+2. **Editor Information** - *editors.csv*: Information from Turkers about editors for each Journal. A simple name-matching algorithm was used to join editors for the same journal.
+3. **Gender Information** - *genders.csv*:
