@@ -166,9 +166,9 @@ node.append("circle")
     .attr("r", function(d) { return d.r; })
     .style("fill", function(d) { 
           if (d.data.depth == 0) {
-            return '#ddeeff';
+            return '#fffaf5';
           } else {
-            return d3.interpolateBuGn(1.0 * d.data.numWomen / d.data.total * 2); 
+            return d3.interpolatePurples(1.0 * d.data.numWomen / d.data.total * 2); 
           }
     });
 
