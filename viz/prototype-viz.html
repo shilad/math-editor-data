@@ -1,0 +1,240 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/meyer-reset/2.0/reset.min.css">
+  <!--[if lt IE 9]>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv.js"></script>
+  <![endif]-->
+<style>
+
+circle {
+  stroke: rgb(200, 200, 200);
+  stroke-width: 1px;
+}
+
+.node {
+  cursor: pointer;
+}
+
+.node:hover circle {
+  stroke: #000;
+  stroke-width: 1.5px;
+}
+
+.leaf circle {
+  fill: #ff7f0e;
+  fill-opacity: 1;
+}
+
+text {
+  font: 10px serif;
+  text-anchor: middle;
+}
+
+.labelBG {
+  fill: #fff;
+  fill-opacity: 0.5;
+}
+
+svg {
+  margin: 0 auto;
+}
+
+</style>
+
+</head>
+
+<body>
+  <svg width="960" height="960"></svg>
+  <script   src="https://code.jquery.com/jquery-3.1.1.min.js"   integrity="sha256-hVVnYaiADRTO2PzUGmuLJr8BLUSjGIZsDYGmIJLv2b8="   crossorigin="anonymous"></script>
+  <script src="https://d3js.org/d3.v4.min.js"></script>
+  <script src="https://d3js.org/d3-hierarchy.v1.min.js"></script>
+  <script src="https://d3js.org/d3-scale-chromatic.v1.min.js"></script>
+  <script src="editors.js" charset="utf-8"></script>
+  <script>
+
+console.log('loaded ' + editors.length + ' editors');
+
+/**
+ * Sets the name and gender for each editor.
+ */
+editors.forEach(function(e) {
+  if (e.firstName && e.lastName) {
+    e.name = e.firstName + ' ' + e.lastName;
+  } else {
+    e.name = e.lastName || e.firstName || 'Unknown';
+  }
+  if (e.gender == 'male') { 
+    e.gender = 'man';
+  } else if (e.gender == 'female') { 
+    e.gender = 'woman';
+  } else {
+    e.gender = 'unknown';
+  }
+});
+
+/**
+ * Build up the hierarchical datastructure. Retrieves a child with a
+ * particular name, and creates it if it doesn't exist.
+ */
+
+
+var nodeTemplate = { 
+      name : 'Unknown', 
+      depth : 0,
+      gender : 'unknown',
+      numMen : 0,
+      numWomen : 0,
+      numUnknown : 0,
+      total : 0,
+    };
+
+var getChild = function(parent, name, gender) { 
+  var children = parent.children || (parent.children = []);
+  var result = null;
+  for (var i = 0; i < children.length; i++) {
+    if (children[i].name == name) {
+      result = children[i];
+      break;
+    }
+  }
+  if (!result) {
+    result = $.extend({}, nodeTemplate);
+    result.name = name;
+    result.depth = parent.depth + 1;
+    children.push(result);
+  }
+  if (gender == 'man') {
+    result.numMen += 1;
+  } else if (gender == 'woman') {
+    result.numWomen += 1;
+  } else {
+    result.numUnknown += 1;
+  }
+  result.total += 1;
+  return result;
+}
+
+/**
+ * Builds up the hierarchical structure.
+ */
+var root = $.extend({}, nodeTemplate);
+
+editors.forEach(function (e) {
+  var pub = getChild(root, e.publisher, e.gender);
+  var journal = getChild(pub, e.journal, e.gender);
+  var person = getChild(journal, e.name, e.gender);
+
+  // The method for inferring gender
+  person.method = (e.turkGender == 'NA') ? 'name' : 'mturk';
+
+  // Confidence in the prediction method (between 0.0 and 1.0)
+  person.confidence = Math.max(e.probF, e.probM) / 1.0;
+});
+
+console.log('created hierarchical data structure');
+
+var margin = 4;
+var d3root = d3.hierarchy(root)
+    .sum(function(d) { return d.children ? 0 : 1; })
+    .sort(function(a, b) { return b.value - a.value; });
+
+console.log('created d3 hierarchy');
+
+var svg = d3.select("svg"),
+    diameter = +svg.attr("width"),
+    g = svg.append("g").attr("transform", "translate(2,2)"),
+    format = d3.format(",d");
+
+var pack = d3.pack()
+    .size([diameter - margin, diameter - margin]);
+
+var nodes = pack(d3root).descendants();
+
+var node = g.selectAll(".node")
+    .data(nodes)
+    .enter().append("g")
+    .attr("class", function(d) { return d.children ? "node" : "leaf node"; })
+    .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+
+node.append("title")
+    .text(function(d) { return d.data.name; });
+
+node.append("circle")
+    .attr("r", function(d) { return d.r; })
+    .style("fill", function(d) { 
+          if (d.data.depth == 0) {
+            return '#ddeeff';
+          } else {
+            return d3.interpolateBuGn(1.0 * d.data.numWomen / d.data.total * 2); 
+          }
+    });
+
+
+function getBB(selection) {
+    selection.each(function(d){d.bbox = this.getBBox(); });
+}
+
+/**
+ * Labels must be outside of .node because they are above ALL nodes
+ */
+var textGroups = g.selectAll(".labelG")
+    .data(nodes)
+    .enter().append('g')
+    .attr('class', 'labelG')
+    .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+
+textGroups.append('rect').attr('class', 'labelBG');
+
+var text = textGroups
+    .append('text')
+    .attr("class", "label")
+    .style("fill-opacity", function(d) { return d.parent === d3root ? 1 : 0; })
+    .style("display", function(d) { return d.parent === d3root ? "inline" : "none"; })
+    .style("font-size", function(d) { return Math.ceil(Math.pow(d.r, 0.7) / 1.5) + 'px'; })
+    .text(function(d) { return d.data.name; })
+    .call(getBB);
+
+textGroups.selectAll('rect')
+    .attr("x", function(d){if (d.bbox.width) return d.bbox.x; })
+    .attr("y", function(d){return d.bbox.y; })
+    .attr("width", function(d){return d.bbox.width; })
+    .attr("height", function(d){return d.bbox.height; })
+
+svg.on("click", function() { zoom(d3root); });
+
+/*
+
+zoomTo([d3root.x, d3root.y, d3root.r * 2 + margin]);
+
+function zoom(d) {
+  var focus0 = focus; focus = d;
+
+  var transition = d3.transition()
+      .duration(d3.event.altKey ? 7500 : 750)
+      .tween("zoom", function(d) {
+        var i = d3.interpolateZoom(view, [focus.x, focus.y, focus.r * 2 + margin]);
+        return function(t) { zoomTo(i(t)); };
+      });
+
+  transition.selectAll("text")
+    .filter(function(d) { return d.parent === focus || this.style.display === "inline"; })
+      .style("fill-opacity", function(d) { return d.parent === focus ? 1 : 0; })
+      .on("start", function(d) { if (d.parent === focus) this.style.display = "inline"; })
+      .on("end", function(d) { if (d.parent !== focus) this.style.display = "none"; });
+}
+
+function zoomTo(v) {
+  var k = diameter / v[2]; view = v;
+  node.attr("transform", function(d) { return "translate(" + (d.x - v[0]) * k + "," + (d.y - v[1]) * k + ")"; });
+  circle.attr("r", function(d) { return d.r * k; });
+}
+
+*/
+
+
+  </script>
+</body>
+</html>
