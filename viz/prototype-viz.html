@@ -9,6 +9,10 @@
   <![endif]-->
 <style>
 
+body {
+  background-color: #e4e4e9;
+}
+
 circle {
   stroke: rgb(200, 200, 200);
   stroke-width: 1px;
@@ -38,8 +42,9 @@ text {
   fill-opacity: 0.5;
 }
 
-svg {
+#container {
   margin: 0 auto;
+  width: 960px;
 }
 
 </style>
@@ -47,7 +52,9 @@ svg {
 </head>
 
 <body>
+  <div id=container>
   <svg width="960" height="960"></svg>
+  </div>
   <script   src="https://code.jquery.com/jquery-3.1.1.min.js"   integrity="sha256-hVVnYaiADRTO2PzUGmuLJr8BLUSjGIZsDYGmIJLv2b8="   crossorigin="anonymous"></script>
   <script src="https://d3js.org/d3.v4.min.js"></script>
   <script src="https://d3js.org/d3-hierarchy.v1.min.js"></script>
