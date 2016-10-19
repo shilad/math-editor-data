@@ -71,7 +71,7 @@ editors.forEach(function(e) {
   if (e.firstName && e.lastName) {
     e.name = e.firstName + ' ' + e.lastName;
   } else {
-    e.name = e.lastName || e.firstName || 'Unknown';
+    e.name = e.lastName || e.firstName || '';
   }
   if (e.gender == 'male') { 
     e.gender = 'man';
@@ -89,7 +89,7 @@ editors.forEach(function(e) {
 
 
 var nodeTemplate = { 
-      name : 'Unknown', 
+      name : '', 
       depth : 0,
       gender : 'unknown',
       numMen : 0,
@@ -152,8 +152,9 @@ console.log('created d3 hierarchy');
 
 var svg = d3.select("svg"),
     diameter = +svg.attr("width"),
-    g = svg.append("g").attr("transform", "translate(2,2)"),
+    g = svg.append("g").attr("transform", "translate(" + diameter / 2 + "," + diameter / 2 + ")");
     format = d3.format(",d");
+    focus = d3root;
 
 var pack = d3.pack()
     .size([diameter - margin, diameter - margin]);
@@ -163,13 +164,12 @@ var nodes = pack(d3root).descendants();
 var node = g.selectAll(".node")
     .data(nodes)
     .enter().append("g")
-    .attr("class", function(d) { return d.children ? "node" : "leaf node"; })
-    .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+    .attr("class", function(d) { return d.children ? "node" : "leaf node"; });
 
 node.append("title")
     .text(function(d) { return d.data.name; });
 
-node.append("circle")
+var circle = node.append("circle")
     .attr("r", function(d) { return d.r; })
     .style("fill", function(d) { 
           if (d.data.depth == 0) {
@@ -177,12 +177,12 @@ node.append("circle")
           } else {
             return d3.interpolatePurples(1.0 * d.data.numWomen / d.data.total * 2); 
           }
-    });
+    })
+    .on("click", function(d) { if (focus !== d) zoom(d), d3.event.stopPropagation(); });
 
+var nonEditorCircles = circle.filter(function (d) { return d.children; });
+var editorCircles = circle.filter(function (d) { return !d.children; });
 
-function getBB(selection) {
-    selection.each(function(d){d.bbox = this.getBBox(); });
-}
 
 /**
  * Labels must be outside of .node because they are above ALL nodes
@@ -190,57 +190,79 @@ function getBB(selection) {
 var textGroups = g.selectAll(".labelG")
     .data(nodes)
     .enter().append('g')
-    .attr('class', 'labelG')
-    .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+    .attr('class', 'labelG');
 
 textGroups.append('rect').attr('class', 'labelBG');
 
 var text = textGroups
     .append('text')
     .attr("class", "label")
-    .style("fill-opacity", function(d) { return d.parent === d3root ? 1 : 0; })
-    .style("display", function(d) { return d.parent === d3root ? "inline" : "none"; })
-    .style("font-size", function(d) { return Math.ceil(Math.pow(d.r, 0.7) / 1.5) + 'px'; })
-    .text(function(d) { return d.data.name; })
-    .call(getBB);
-
-textGroups.selectAll('rect')
-    .attr("x", function(d){if (d.bbox.width) return d.bbox.x; })
-    .attr("y", function(d){return d.bbox.y; })
-    .attr("width", function(d){return d.bbox.width; })
-    .attr("height", function(d){return d.bbox.height; })
+    .text(function(d) { return d.data.name; });
 
 svg.on("click", function() { zoom(d3root); });
 
-/*
-
-zoomTo([d3root.x, d3root.y, d3root.r * 2 + margin]);
+zoomTo(circle, [d3root.x, d3root.y, d3root.r * 2 + margin]);
+updateTextFields([d3root.x, d3root.y, d3root.r * 2 + margin]);
 
 function zoom(d) {
   var focus0 = focus; focus = d;
 
+  textGroups.style('display', 'none'); // Hide labels
+  editorCircles.style('display', 'none');
+
+  var nextView = [focus.x, focus.y, focus.r * 2 + margin];
   var transition = d3.transition()
-      .duration(d3.event.altKey ? 7500 : 750)
+      .duration(1000)
       .tween("zoom", function(d) {
-        var i = d3.interpolateZoom(view, [focus.x, focus.y, focus.r * 2 + margin]);
-        return function(t) { zoomTo(i(t)); };
+        var i = d3.interpolateZoom(view, nextView);
+        return function(t) { zoomTo(nonEditorCircles, i(t)); };
       });
 
-  transition.selectAll("text")
-    .filter(function(d) { return d.parent === focus || this.style.display === "inline"; })
-      .style("fill-opacity", function(d) { return d.parent === focus ? 1 : 0; })
-      .on("start", function(d) { if (d.parent === focus) this.style.display = "inline"; })
-      .on("end", function(d) { if (d.parent !== focus) this.style.display = "none"; });
+  var n = 0;
+  transition.selectAll('.labelG')
+      .on("start", function() { n++; })
+      .on("end", function() { 
+          if (--n == 0) {
+            zoomTo(circle, nextView);
+            editorCircles.style('display', 'inline');
+            updateTextFields(nextView); 
+          }});
 }
 
-function zoomTo(v) {
+function getBB(selection) {
+    selection.each(function(d){d.bbox = this.getBBox(); });
+}
+
+function translate(d, v) {
+  var k = diameter / v[2];
+  return "translate(" + (d.x - v[0]) * k + "," + (d.y - v[1]) * k + ")";
+}
+
+function zoomTo(circleGroup, v) {
   var k = diameter / v[2]; view = v;
-  node.attr("transform", function(d) { return "translate(" + (d.x - v[0]) * k + "," + (d.y - v[1]) * k + ")"; });
-  circle.attr("r", function(d) { return d.r * k; });
+  circleGroup.attr("cx", function(d) { return (d.x - v[0]) * k; })
+        .attr("cy", function(d) { return (d.y - v[1]) * k; })
+        .attr("r", function(d) { return d.r * k; });
 }
 
-*/
+function updateTextFields(v) {
+  var k = diameter / v[2];
+  var active = textGroups
+    .style('display', function(d) { return (d.parent === focus || d === focus) ? 'inline' : 'none' })
+    .filter(function(d) { return this.style.display === "inline"; })
 
+  active.attr("transform", function(d) { return translate(d, v); });
+
+  active.selectAll('text')
+    .style("font-size", function(d) { return Math.ceil(Math.pow(k, 0.75) * Math.pow(d.r, 0.7) / 1.5) + 'px'; })
+    .call(getBB);
+
+  active.selectAll('rect')
+    .attr("x", function(d){if (d.bbox.width) return d.bbox.x; })
+    .attr("y", function(d){return d.bbox.y; })
+    .attr("width", function(d){return d.bbox.width; })
+    .attr("height", function(d){return d.bbox.height; })
+}
 
   </script>
 </body>
