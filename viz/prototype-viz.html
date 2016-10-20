@@ -18,34 +18,64 @@ circle {
   stroke-width: 1px;
 }
 
-.node {
+.hoverCircle {
   cursor: pointer;
-}
-
-.node:hover circle {
+  stroke: 1px;
   stroke: #000;
-  stroke-width: 1.5px;
+  stroke-opacity: 0;
+  fill-opacity: 0;
 }
 
-.leaf circle {
-  fill: #ff7f0e;
+.hoverCircle:hover {
+  cursor: pointer;
+  stroke-opacity: 1;
+}
+
+
+.interiorCircle { cursor: pointer; }
+
+.leafCircle {
+  cursor: pointer;
   fill-opacity: 1;
 }
 
 text {
+  cursor: pointer;
   font: 10px serif;
   text-anchor: middle;
 }
 
-.labelBG {
+.interiorLabelBackground {
   fill: #fff;
   fill-opacity: 0.5;
+}
+
+.leafLabelBackground {
+  fill: #fff;
+  fill-opacity: 0.3;
 }
 
 #container {
   margin: 0 auto;
   width: 960px;
 }
+
+div.tooltip { 
+    position: absolute;     
+    text-align: center;     
+    width: auto;          
+    height: auto;         
+    padding: 2px;       
+    font: 12px sans-serif;    
+    background: #E1EDE7; 
+    border: 1px solid #666;    
+    border-radius: 8px;     
+    color: #444;
+    pointer-events: none;     
+}
+
+div.tooltip span.name { font-weight: 700; color: #222; }
+div.tooltip span.instructions { color: #777; }
 
 </style>
 
@@ -65,39 +95,12 @@ text {
 console.log('loaded ' + editors.length + ' editors');
 
 /**
- * Sets the name and gender for each editor.
- */
-editors.forEach(function(e) {
-  if (e.firstName && e.lastName) {
-    e.name = e.firstName + ' ' + e.lastName;
-  } else {
-    e.name = e.lastName || e.firstName || '';
-  }
-  if (e.gender == 'male') { 
-    e.gender = 'man';
-  } else if (e.gender == 'female') { 
-    e.gender = 'woman';
-  } else {
-    e.gender = 'unknown';
-  }
-});
-
-/**
  * Build up the hierarchical datastructure. Retrieves a child with a
  * particular name, and creates it if it doesn't exist.
  */
 
-
-var nodeTemplate = { 
-      name : '', 
-      depth : 0,
-      gender : 'unknown',
-      numMen : 0,
-      numWomen : 0,
-      numUnknown : 0,
-      total : 0,
-    };
-
+var nodeTemplate = { name : '', depth : 0, gender : 'unknown',
+                     numMen : 0, numWomen : 0, numUnknown : 0, total : 0, };
 var getChild = function(parent, name, gender) { 
   var children = parent.children || (parent.children = []);
   var result = null;
@@ -124,144 +127,327 @@ var getChild = function(parent, name, gender) {
   return result;
 }
 
+
 /**
  * Builds up the hierarchical structure.
  */
 var root = $.extend({}, nodeTemplate);
+root.name = 'all editors';
 
 editors.forEach(function (e) {
   var pub = getChild(root, e.publisher, e.gender);
   var journal = getChild(pub, e.journal, e.gender);
   var person = getChild(journal, e.name, e.gender);
 
-  // The method for inferring gender
-  person.method = (e.turkGender == 'NA') ? 'name' : 'mturk';
+  person.gender = e.gender;
+  person.method = e.method;
+  person.confidence = e.confidence;
+});
 
-  // Confidence in the prediction method (between 0.0 and 1.0)
-  person.confidence = Math.max(e.probF, e.probM) / 1.0;
+// Fix up stats for root
+root.children.forEach(function (child) {
+  root.numMen += child.numMen;
+  root.numWomen += child.numWomen;
+  root.total += child.total;
 });
 
 console.log('created hierarchical data structure');
 
+/**
+ * Create the D3 datastructure
+ */
 var margin = 4;
 var d3root = d3.hierarchy(root)
-    .sum(function(d) { return d.children ? 0 : 1; })
+    .sum(function(d) { return d.children ? 0 : d.total; })
     .sort(function(a, b) { return b.value - a.value; });
 
 console.log('created d3 hierarchy');
 
+/**
+ * Prepare the golbal d3 variables.
+ */
 var svg = d3.select("svg"),
     diameter = +svg.attr("width"),
     g = svg.append("g").attr("transform", "translate(" + diameter / 2 + "," + diameter / 2 + ")");
     format = d3.format(",d");
     focus = d3root;
 
+/**
+ * Create the circle packing visualization
+ */
 var pack = d3.pack()
     .size([diameter - margin, diameter - margin]);
-
 var nodes = pack(d3root).descendants();
 
-var node = g.selectAll(".node")
-    .data(nodes)
-    .enter().append("g")
-    .attr("class", function(d) { return d.children ? "node" : "leaf node"; });
-
-node.append("title")
-    .text(function(d) { return d.data.name; });
-
-var circle = node.append("circle")
-    .attr("r", function(d) { return d.r; })
-    .style("fill", function(d) { 
-          if (d.data.depth == 0) {
-            return '#fffaf5';
-          } else {
-            return d3.interpolatePurples(1.0 * d.data.numWomen / d.data.total * 2); 
-          }
-    })
-    .on("click", function(d) { if (focus !== d) zoom(d), d3.event.stopPropagation(); });
-
-var nonEditorCircles = circle.filter(function (d) { return d.children; });
-var editorCircles = circle.filter(function (d) { return !d.children; });
+/**
+ * We have five layers: interior circles, editors, text backgrounds, text itself, and event overlays.
+ */
 
 
 /**
- * Labels must be outside of .node because they are above ALL nodes
+ * Layer 1: Circles that are interior to the hierarchy.
  */
-var textGroups = g.selectAll(".labelG")
-    .data(nodes)
-    .enter().append('g')
-    .attr('class', 'labelG');
+var interiorNodes = nodes.filter(function (d) { return d.children; });
+var interiorCircles = g.append('g')
+  .attr('class', 'interiorCircleLayer')
+  .selectAll('.interiorCircle')
+  .data(interiorNodes)
+  .enter().append("circle")
+     .attr('class', 'interiorCircle')
+     .attr("r", function(d) { return d.r; })
+     .style("fill", function(d) { 
+        if (d.data.depth == 0) {
+            return '#fffaf5';
+        } else {
+            return d3.interpolatePurples(1.0 * d.data.numWomen / d.data.total * 2); 
+        }
+     });
 
-textGroups.append('rect').attr('class', 'labelBG');
+/**
+ * Layer 2: Circles that are leaves in the hierarchy, i.e. editors.
+ */
+var leafNodes = nodes.filter(function (d) { return !(d.children); }); 
+var leafCircles = g.append('g')
+  .attr('class', 'leafCircleLayer')
+  .selectAll('.leafCircleLayer')
+  .data(leafNodes)
+  .enter().append("circle")
+    .attr('class', 'leafCircle')
+    .attr("r", function(d) { return d.r; })
+    .style("fill", function(d) { 
+        if (d.data.depth == 0) {
+          return '#fffaf5';
+        } else {
+          return d3.interpolatePurples(1.0 * d.data.numWomen / d.data.total * 2); 
+        }
+    });
 
-var text = textGroups
+
+/**
+ * Layer 3: Text labels for interior nodes (rectangle backgrounds + text)
+ */
+function ellipsize(text) {
+  return (text.length < 30) ? text : (text.substring(0, 27) + '...');
+}
+
+var interiorLabelGroups = g.append('g')
+  .attr('class', 'interiorLabelLayer')
+  .selectAll(".interiorLabelGroup")
+  .data(interiorNodes.filter(function (d) { return d != d3root; }))
+  .enter().append('g')
+    .attr('class', 'interiorLabelGroup');
+
+interiorLabelGroups
+  .append('rect')
+    .attr('class', 'interiorLabelBackground');
+
+var interiorLabels = interiorLabelGroups
     .append('text')
-    .attr("class", "label")
-    .text(function(d) { return d.data.name; });
+    .attr("class", "interiorLabel")
+    .text(function(d) { return ellipsize(d.data.name); });
+
+
+/**
+ * Layer 4: Text labels for leaf nodes (rectangle backgrounds + text)
+ * Only visible when zoomed into a journal
+ */
+var leafLabelGroups = g.append('g')
+  .attr('class', 'leafLabelLayer');
+
+/**
+ * Layer 5: Event overlays
+ */
+var eventOverlay = g.append('g')
+  .attr('class', 'eventOverlay');
+
+/**
+ * Layer 6: Tooltip
+ */
+var tooltip = d3.select("body").append("div") 
+    .attr("class", "tooltip")       
+    .style("opacity", 0);
 
 svg.on("click", function() { zoom(d3root); });
 
-zoomTo(circle, [d3root.x, d3root.y, d3root.r * 2 + margin]);
-updateTextFields([d3root.x, d3root.y, d3root.r * 2 + margin]);
+zoomInterior([d3root.x, d3root.y, d3root.r * 2 + margin]);
+finalizeView([d3root.x, d3root.y, d3root.r * 2 + margin]);
 
 function zoom(d) {
   var focus0 = focus; focus = d;
 
-  textGroups.style('display', 'none'); // Hide labels
-  editorCircles.style('display', 'none');
+  // Hide all labels and leaf circles, remove labels and event overlays
+  interiorLabelGroups.style('display', 'none');
+  leafCircles.style('display', 'none');
+  leafLabelGroups.selectAll(".leafLabelGroup").remove();
+  eventOverlay.selectAll('circle').remove();
 
   var nextView = [focus.x, focus.y, focus.r * 2 + margin];
-  var transition = d3.transition()
-      .duration(1000)
-      .tween("zoom", function(d) {
-        var i = d3.interpolateZoom(view, nextView);
-        return function(t) { zoomTo(nonEditorCircles, i(t)); };
-      });
 
-  var n = 0;
-  transition.selectAll('.labelG')
-      .on("start", function() { n++; })
-      .on("end", function() { 
-          if (--n == 0) {
-            zoomTo(circle, nextView);
-            editorCircles.style('display', 'inline');
-            updateTextFields(nextView); 
-          }});
+  // Queue up the zoom
+  var transition = d3.transition()
+    .duration(1000)
+    .tween("zoom", function(d) {
+        var i = d3.interpolateZoom(view, nextView);
+        return function(t) { zoomInterior(i(t)); };
+    });
+
+  // When the zoom ends, finalize the view
+  transition.selectAll('.interiorCircleLayer')
+    .on("end", function() { 
+            zoomInterior(nextView);
+            finalizeView(nextView); 
+          });
 }
 
-function getBB(selection) {
+/**
+ * Zoom all interior circles to a certain level.
+ */
+function zoomInterior(v) {
+  var k = diameter / v[2]; view = v;
+  interiorCircles
+    .attr("cx", function(d) { return (d.x - v[0]) * k; })
+    .attr("cy", function(d) { return (d.y - v[1]) * k; })
+    .attr("r", function(d) { return d.r * k; });
+}
+
+/**
+ * Stashes the bounding box for each element in the selection in the
+ * datum's bbox attribute.
+ */
+function storeBBox(selection) {
     selection.each(function(d){d.bbox = this.getBBox(); });
 }
 
-function translate(d, v) {
+/**
+ * Sets all circles to the 
+ */
+function setCirclePosition(selection, v) {
   var k = diameter / v[2];
-  return "translate(" + (d.x - v[0]) * k + "," + (d.y - v[1]) * k + ")";
+
+  selection
+    .attr("cx", function(d) { return (d.x - v[0]) * k; })
+    .attr("cy", function(d) { return (d.y - v[1]) * k; })
+    .attr("r", function(d) { return d.r * k; })
 }
 
-function zoomTo(circleGroup, v) {
-  var k = diameter / v[2]; view = v;
-  circleGroup.attr("cx", function(d) { return (d.x - v[0]) * k; })
-        .attr("cy", function(d) { return (d.y - v[1]) * k; })
-        .attr("r", function(d) { return d.r * k; });
-}
-
-function updateTextFields(v) {
+function setLabelPositions(selection, v) {
   var k = diameter / v[2];
-  var active = textGroups
-    .style('display', function(d) { return (d.parent === focus || d === focus) ? 'inline' : 'none' })
-    .filter(function(d) { return this.style.display === "inline"; })
 
-  active.attr("transform", function(d) { return translate(d, v); });
+  selection
+    .attr("transform", function(d) { return "translate(" + (d.x - v[0]) * k + "," + (d.y - v[1]) * k + ")"; });
 
-  active.selectAll('text')
+  selection.selectAll('text')
     .style("font-size", function(d) { return Math.ceil(Math.pow(k, 0.75) * Math.pow(d.r, 0.7) / 1.5) + 'px'; })
-    .call(getBB);
+    .call(storeBBox);
 
-  active.selectAll('rect')
+  selection.selectAll('rect')
     .attr("x", function(d){if (d.bbox.width) return d.bbox.x; })
     .attr("y", function(d){return d.bbox.y; })
     .attr("width", function(d){return d.bbox.width; })
     .attr("height", function(d){return d.bbox.height; })
+}
+
+function makeTooltipHtml(d) {
+    var percent = d3.format(",.1%")(1.0 * d.data.numWomen / d.data.total);
+    var statsHtml = d.data.numMen + ' men, ' + d.data.numWomen + ' women (' + percent + ')';
+    var html;
+    if (d.data.depth == 0) {
+      html = '<span class=name>All editors</span> <br>' + statsHtml;
+    } else if (d.data.depth == 1) {
+      html = 'Publisher: <br><span class=name>' + d.data.name  + '</span> <br>' + statsHtml;
+    } else if (d.data.depth == 2) {
+      html = 'Journal:<br><span class=name>' + d.data.name  + '</span> <br>' + statsHtml;
+    } else if (d.data.depth == 3) {
+      var conf = d3.format(",.1%")(d.data.confidence);
+      var method = (d.data.method == 'name')
+          ? 'typical genders for people with editor\'s first name'
+          : 'research from Mechanical Turk workers';
+      html = 'Editor:<br><span class=name>' + d.data.name  + '</span> <br>';
+      html += 'Inferred gender is ' + d.data.gender + '<br>';
+      html += 'Based on ' + method;
+    
+    }
+
+    if (d != focus && d.data.depth != 3) {
+      html += '<br/><span class=instructions>click to zoom</span>';
+    }
+    return html;
+}
+
+function finalizeView(v) {
+  var k = diameter / v[2];
+
+  setCirclePosition(leafCircles, v);
+  leafCircles.style('display', 'inline');
+
+  var active = interiorLabelGroups
+    .style('display', function(d) { return (d.parent === focus || d === focus) ? 'inline' : 'none' })
+    .filter(function(d) { return this.style.display === "inline"; })
+
+  setLabelPositions(active, v);
+
+  if (focus.depth == 2) {
+    var lgs = leafLabelGroups
+      .selectAll(".leafLabelGroup")
+      .data(leafNodes.filter(function(d) { return d.parent === focus; }))
+      .enter().append('g')
+      .attr('class', 'leafLabelGroup');
+
+    lgs.append('rect')
+      .attr('class', 'leafLabelBackground');
+
+    lgs.append('text')
+      .attr("class", "leafLabel")
+      .text(function(d) { return ellipsize(d.data.name); });
+
+    setLabelPositions(lgs, v);
+  }
+
+  var selectableNodes = nodes.filter(
+    function (d) { return d.parent === focus || d.data.depth <= focus.depth; });
+
+  var currentOverlay = eventOverlay
+      .selectAll('circle')
+      .data(selectableNodes)
+      .enter().append('circle')
+        .attr('class', 'hoverCircle')
+        .on("click", function(d) { 
+            if (d === focus && focus === d3root) {
+              // do nothing...
+            } else if (d === focus) {
+              zoom(focus.parent);
+            } else {
+              zoom(d);
+            }
+            d3.event.stopPropagation(); 
+        })
+        .on("mouseover", function(d) {    
+            if (d.data.level == 0) return;
+
+            // From http://stackoverflow.com/a/24041991/141245
+            var matrix = this.getScreenCTM()
+                .translate(+ this.getAttribute("cx"), + this.getAttribute("cy"));
+
+            var html = makeTooltipHtml(d);
+            var x = (window.pageXOffset + matrix.e + 15);
+            var y = (window.pageYOffset + matrix.f - 30);
+
+            tooltip.transition()    
+                .duration(200)    
+                .style("opacity", .95);    
+            tooltip.html(html)
+                .style("left", x + "px")   
+                .style("top", y + "px");  
+            })          
+        .on("mouseout", function(d) {   
+            tooltip.transition()    
+                .duration(500)    
+                .style("opacity", 0); 
+        });
+
+
+  setCirclePosition(currentOverlay, v);
+
 }
 
   </script>
